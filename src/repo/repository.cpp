@@ -13,6 +13,7 @@
 #include "objects/commit.h"
 #include "objects/object.h"
 #include "objects/tree.h"
+#include "repo/history.h"
 
 namespace minigit {
 namespace fs = std::filesystem;
@@ -147,6 +148,65 @@ Oid hashWorkingFile(const fs::path& path) {
 
 bool shouldSkipEntry(const fs::path& path) {
   return path.filename() == kGitDirName;
+}
+
+void validateBranchName(const std::string& name) {
+  if (name.empty()) {
+    throw MinigitError("branch name cannot be empty");
+  }
+  if (name.front() == '-' || name.front() == '/') {
+    throw MinigitError("'" + name + "' is not a valid branch name");
+  }
+  if (name.back() == '/' || name.back() == '.') {
+    throw MinigitError("'" + name + "' is not a valid branch name");
+  }
+  const std::string forbidden = " ~^:?*[\\\t";
+  if (name.find_first_of(forbidden) != std::string::npos) {
+    throw MinigitError("'" + name +
+                       "' is not a valid branch name (no spaces or "
+                       "~^:?*[\\ allowed)");
+  }
+  if (name.find("..") != std::string::npos ||
+      name.find("@{") != std::string::npos ||
+      name.find("//") != std::string::npos) {
+    throw MinigitError("'" + name + "' is not a valid branch name");
+  }
+  if (name.size() >= 5 && name.compare(name.size() - 5, 5, ".lock") == 0) {
+    throw MinigitError("'" + name + "' is not a valid branch name");
+  }
+}
+
+std::optional<Oid> resolveIdPrefix(const ObjectStore& store,
+                                   const std::string& prefix) {
+  if (prefix.size() < 4 || prefix.size() >= Oid::kHexSize) {
+    return std::nullopt;
+  }
+
+  const fs::path directory = store.root() / prefix.substr(0, 2);
+  std::error_code ec;
+  if (!fs::is_directory(directory, ec)) {
+    return std::nullopt;
+  }
+
+  std::vector<Oid> matches;
+  for (const auto& entry : fs::directory_iterator(directory, ec)) {
+    const std::string candidate =
+        prefix.substr(0, 2) + entry.path().filename().string();
+    if (candidate.rfind(prefix, 0) != 0) {
+      continue;
+    }
+    if (auto oid = Oid::tryParse(candidate)) {
+      matches.push_back(*oid);
+    }
+  }
+
+  if (matches.size() > 1) {
+    throw MinigitError("short object id '" + prefix + "' is ambiguous");
+  }
+  if (matches.size() == 1) {
+    return matches.front();
+  }
+  return std::nullopt;
 }
 
 }  // namespace
@@ -433,6 +493,178 @@ std::map<std::string, Oid> Repository::headTree() const {
   std::map<std::string, Oid> files;
   flattenTree(objects_, treeOf(*head), "", files);
   return files;
+}
+
+std::optional<Commit> Repository::readCommit(const Oid& commitId) const {
+  return minigit::readCommit(objects_, commitId);
+}
+
+std::vector<std::pair<std::string, Oid>> Repository::branches() const {
+  std::vector<std::pair<std::string, Oid>> result;
+
+  const fs::path directory = gitDir_ / kRefsDir;
+  std::error_code ec;
+  if (!fs::is_directory(directory, ec)) {
+    return result;
+  }
+
+  for (const auto& entry : fs::recursive_directory_iterator(directory, ec)) {
+    if (!entry.is_regular_file(ec)) {
+      continue;
+    }
+    const std::string name =
+        entry.path().lexically_relative(directory).generic_string();
+    try {
+      result.emplace_back(name, Oid::fromHex(trim(readFile(entry.path()))));
+    } catch (const MinigitError&) {
+      // A damaged ref file is ignored rather than breaking every command.
+    }
+  }
+
+  std::sort(result.begin(), result.end(),
+            [](const auto& a, const auto& b) { return a.first < b.first; });
+  return result;
+}
+
+bool Repository::branchExists(const std::string& name) const {
+  std::error_code ec;
+  return !name.empty() &&
+         fs::is_regular_file(gitDir_ / kRefsDir / name, ec);
+}
+
+void Repository::createBranch(const std::string& name) {
+  validateBranchName(name);
+  if (branchExists(name)) {
+    throw MinigitError("a branch named '" + name + "' already exists");
+  }
+
+  const auto head = headCommit();
+  if (!head.has_value()) {
+    throw MinigitError("cannot create branch '" + name +
+                       "': the repository has no commits yet");
+  }
+
+  const fs::path refPath = gitDir_ / kRefsDir / name;
+  std::error_code ec;
+  fs::create_directories(refPath.parent_path(), ec);
+  if (ec) {
+    throw MinigitError("cannot create branch '" + name + "': " + ec.message());
+  }
+  writeFile(refPath, head->hex() + "\n");
+}
+
+std::optional<Oid> Repository::resolveRevision(
+    const std::string& revision) const {
+  if (revision.empty()) {
+    return std::nullopt;
+  }
+
+  if (branchExists(revision)) {
+    return Oid::fromHex(trim(readFile(gitDir_ / kRefsDir / revision)));
+  }
+
+  if (auto oid = Oid::tryParse(revision)) {
+    if (objects_.contains(*oid)) {
+      return oid;
+    }
+    return std::nullopt;
+  }
+
+  return resolveIdPrefix(objects_, revision);
+}
+
+bool Repository::isClean() const {
+  const StatusReport report = status();
+  return report.staged.empty() && report.unstaged.empty();
+}
+
+void Repository::writeWorkingTree(
+    const std::map<std::string, Oid>& targetTree,
+    const Index& previousIndex) {
+  std::error_code ec;
+
+  // Files tracked before but absent from the target are removed, and their
+  // now-empty directories pruned.
+  for (const auto& [path, oid] : previousIndex.entries()) {
+    (void)oid;
+    if (targetTree.count(path) > 0) {
+      continue;
+    }
+    const fs::path file = workTree_ / fs::path(path);
+    fs::remove(file, ec);
+
+    fs::path directory = file.parent_path();
+    while (directory != workTree_ && directory.string().size() >
+                                          workTree_.string().size()) {
+      if (!fs::is_empty(directory, ec)) {
+        break;
+      }
+      fs::remove(directory, ec);
+      directory = directory.parent_path();
+    }
+  }
+
+  for (const auto& [path, oid] : targetTree) {
+    const Object blob = objects_.readOrThrow(oid);
+    if (blob.type() != ObjectType::Blob) {
+      throw MinigitError("tree entry '" + path + "' does not point at a blob");
+    }
+    const fs::path file = workTree_ / fs::path(path);
+    fs::create_directories(file.parent_path(), ec);
+    if (ec) {
+      throw MinigitError("cannot create directory for '" + path +
+                         "': " + ec.message());
+    }
+    writeFile(file, blob.data());
+  }
+}
+
+void Repository::checkout(const std::string& target) {
+  const auto revision = resolveRevision(target);
+  if (!revision.has_value()) {
+    throw MinigitError("pathspec '" + target +
+                       "' did not match any branch or commit");
+  }
+
+  const Oid targetTreeId = treeOf(*revision);
+  if (!isClean()) {
+    throw MinigitError(
+        "your local changes would be overwritten by checkout; commit them "
+        "or add them first");
+  }
+
+  std::map<std::string, Oid> targetTree;
+  flattenTree(objects_, targetTreeId, "", targetTree);
+
+  Index previous(indexPath());
+  previous.load();
+
+  for (const auto& [path, oid] : targetTree) {
+    (void)oid;
+    std::error_code ec;
+    if (previous.oidFor(path).has_value()) {
+      continue;
+    }
+    if (fs::exists(workTree_ / fs::path(path), ec)) {
+      throw MinigitError("untracked working tree file '" + path +
+                         "' would be overwritten by checkout");
+    }
+  }
+
+  writeWorkingTree(targetTree, previous);
+
+  Index next(indexPath());
+  next.clear();
+  for (const auto& [path, oid] : targetTree) {
+    next.add(path, oid);
+  }
+  next.save();
+
+  if (branchExists(target)) {
+    writeFile(headPath(), "ref: refs/heads/" + target + "\n");
+  } else {
+    writeFile(headPath(), revision->hex() + "\n");
+  }
 }
 
 StatusReport Repository::status() const {
