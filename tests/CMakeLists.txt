@@ -39,3 +39,19 @@ add_test(NAME graph_test COMMAND graph_test)
 add_executable(branch_test branch_test.cpp)
 target_link_libraries(branch_test PRIVATE minigit_core ${MINIGIT_GTEST_MAIN})
 add_test(NAME branch_test COMMAND branch_test)
+
+add_executable(lcs_test lcs_test.cpp)
+target_link_libraries(lcs_test PRIVATE minigit_core ${MINIGIT_GTEST_MAIN})
+add_test(NAME lcs_test COMMAND lcs_test)
+
+add_executable(myers_test myers_test.cpp)
+target_link_libraries(myers_test PRIVATE minigit_core ${MINIGIT_GTEST_MAIN})
+add_test(NAME myers_test COMMAND myers_test)
+
+add_executable(unified_test unified_test.cpp)
+target_link_libraries(unified_test PRIVATE minigit_core ${MINIGIT_GTEST_MAIN})
+add_test(NAME unified_test COMMAND unified_test)
+
+add_executable(diff_repository_test diff_repository_test.cpp)
+target_link_libraries(diff_repository_test PRIVATE minigit_core ${MINIGIT_GTEST_MAIN})
+add_test(NAME diff_repository_test COMMAND diff_repository_test)
