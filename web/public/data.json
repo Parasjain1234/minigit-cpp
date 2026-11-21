@@ -1,0 +1,24 @@
+{
+  "branch": "main",
+  "detached": false,
+  "head": "a45bac55380b69472973f7b2ee5315607ba0bcd2",
+  "branches": [
+    {"name": "docs/readme", "commit": "a45bac55380b69472973f7b2ee5315607ba0bcd2"},
+    {"name": "feature/diff", "commit": "f45beb36e618134b6bbd376c931a9cfc5596197b"},
+    {"name": "main", "commit": "a45bac55380b69472973f7b2ee5315607ba0bcd2"}
+  ],
+  "commits": [
+    {"id": "a45bac55380b69472973f7b2ee5315607ba0bcd2", "tree": "710c4f6d26c4c3108781194f81dd1c5e7fda7090", "parents": ["35eb5adac5bf374e727d2ec96b7d6dad5fc4faad"], "author": "MiniGit User <minigit@example.com>", "timestamp": 1795263649, "message": "Document the build steps"},
+    {"id": "35eb5adac5bf374e727d2ec96b7d6dad5fc4faad", "tree": "1bdc55233bf4b8800a3207a30c4d108026206309", "parents": ["eb6bbe68a24709657d27e85e0ffaf0907cb49ec2", "f45beb36e618134b6bbd376c931a9cfc5596197b"], "author": "MiniGit User <minigit@example.com>", "timestamp": 1795263647, "message": "Merge branch 'feature/diff'"},
+    {"id": "eb6bbe68a24709657d27e85e0ffaf0907cb49ec2", "tree": "1ea8dcb516bd4f3bb855783addb61278ee366097", "parents": ["8659701f3bcf74782add2e45cc7d3e4c80a685a8"], "author": "MiniGit User <minigit@example.com>", "timestamp": 1795263646, "message": "Print the version banner"},
+    {"id": "f45beb36e618134b6bbd376c931a9cfc5596197b", "tree": "1bf1018f473ee3a05d8311245f49e34994bd0d19", "parents": ["2d4962f7f9c660cc499cd2d279aed83826778eef"], "author": "MiniGit User <minigit@example.com>", "timestamp": 1795263644, "message": "Backtrack the LCS table into an edit script"},
+    {"id": "2d4962f7f9c660cc499cd2d279aed83826778eef", "tree": "d39683ff0e4ac3c90f985aab40f50b7190a8c9d9", "parents": ["8659701f3bcf74782add2e45cc7d3e4c80a685a8"], "author": "MiniGit User <minigit@example.com>", "timestamp": 1795263643, "message": "Add LCS diff skeleton"},
+    {"id": "8659701f3bcf74782add2e45cc7d3e4c80a685a8", "tree": "70e2a7bae3b780620c03a8c3a8d1758fcf06a3fe", "parents": [], "author": "MiniGit User <minigit@example.com>", "timestamp": 1795263639, "message": "Initial commit: project skeleton"}
+  ],
+  "files": [
+    {"path": "README.md", "size": 121, "blob": "85e55618cf751ec2ff7e7f24a8679f8d5ee49149"},
+    {"path": "src/diff.cpp", "size": 186, "blob": "eb7382670c5fdd38df02b45a1154d53bc1d6ce89"},
+    {"path": "src/main.cpp", "size": 104, "blob": "8fe8c5a9953f43074cb1fbaf948a6d3c53c37c3a"}
+  ],
+  "objectCounts": {"blobs": 6, "trees": 11, "commits": 6}
+}
