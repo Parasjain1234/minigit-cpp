@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>minigit — a version control system built from scratch</title>
+  <meta name="description" content="MiniGit is a Git-like version control system in C++17: SHA-1 from scratch, Merkle trees, a commit DAG, DP diffs and BFS merges." />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#top">
+      <span class="brand-mark">⑂</span>
+      <span>minigit</span>
+    </a>
+    <nav class="topnav">
+      <a href="#graph">Graph</a>
+      <a href="#diff">Diff</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#cli">CLI</a>
+      <a class="ghost-button" href="https://github.com/Parasjain1234/minigit-cpp" target="_blank" rel="noreferrer">GitHub ↗</a>
+    </nav>
+  </header>
+
+  <main id="top">
+    <section class="hero">
+      <p class="eyebrow">A Git-like VCS, written from scratch</p>
+      <h1>minigit<span class="accent">.</span></h1>
+      <p class="lede">
+        SHA-1 by hand. A Merkle tree for every directory. A DAG for history.
+        An LCS table and Myers' algorithm for diffs. A BFS merge-base for
+        three-way merges. C++17 and the standard library, nothing else.
+      </p>
+      <div class="chips" aria-label="Highlights">
+        <span class="chip">C++17</span>
+        <span class="chip">SHA-1 from scratch</span>
+        <span class="chip">Content-addressable objects</span>
+        <span class="chip">Huffman compression</span>
+        <span class="chip">GoogleTest</span>
+      </div>
+      <div id="hero-stats" class="stats" aria-live="polite"></div>
+      <p id="data-error" class="notice" hidden>
+        The demo snapshot could not be loaded. Run <code>minigit export &gt; data.json</code>
+        and serve this folder over HTTP.
+      </p>
+    </section>
+
+    <section id="graph" class="section">
+      <div class="section-head">
+        <h2>History is a graph</h2>
+        <p>
+          A real snapshot from <code>minigit export</code>. Every node is a commit,
+          every edge a <code>parent</code> pointer. Click a commit to inspect it.
+        </p>
+      </div>
+      <div class="graph-panel">
+        <div class="graph-scroll">
+          <svg id="dag" role="img" aria-label="Commit DAG of the demo repository"></svg>
+        </div>
+        <aside class="commit-panel">
+          <h3>Branches</h3>
+          <ul id="branch-list" class="branch-list"></ul>
+          <h3>Commit</h3>
+          <div id="commit-detail" class="commit-detail">
+            <p class="muted">Select a commit in the graph.</p>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <section id="diff" class="section">
+      <div class="section-head">
+        <h2>Diff, live</h2>
+        <p>
+          The same two algorithms the CLI uses, ported to JavaScript for this page.
+          LCS builds an <code>n × m</code> DP table; Myers walks diagonals and stays
+          cheap for small changes.
+        </p>
+      </div>
+      <div class="diff-box">
+        <div class="diff-toolbar">
+          <label class="field">
+            <span>Algorithm</span>
+            <select id="algo">
+              <option value="lcs">LCS (DP table)</option>
+              <option value="myers">Myers (greedy)</option>
+            </select>
+          </label>
+          <button id="run-diff" class="primary-button" type="button">Run diff</button>
+          <span id="diff-stats" class="diff-stats"></span>
+        </div>
+        <div class="editors">
+          <label class="editor">
+            <span class="editor-label">before</span>
+            <textarea id="before" spellcheck="false"></textarea>
+          </label>
+          <label class="editor">
+            <span class="editor-label">after</span>
+            <textarea id="after" spellcheck="false"></textarea>
+          </label>
+        </div>
+        <pre id="diff-output" class="diff-output" aria-live="polite"></pre>
+      </div>
+    </section>
+
+    <section id="architecture" class="section">
+      <div class="section-head">
+        <h2>Architecture</h2>
+        <p>Small modules, one job each, wired together by a repository facade.</p>
+      </div>
+      <div class="cards">
+        <article class="card">
+          <h3>hash/</h3>
+          <p>SHA-1 padding and block processing, plus the Huffman codec used for object storage.</p>
+          <code>sha1.cpp · huffman.cpp</code>
+        </article>
+        <article class="card">
+          <h3>objects/</h3>
+          <p>Blobs, trees and commits with a sharded, content-addressed store. Trees are sorted, so equal directories produce equal ids.</p>
+          <code>object_store.cpp · tree.cpp · commit.cpp</code>
+        </article>
+        <article class="card">
+          <h3>repo/</h3>
+          <p>Index, HEAD and refs, Merkle tree construction, branch checkout, history walking and merge orchestration.</p>
+          <code>repository.cpp · history.cpp · ignore.cpp</code>
+        </article>
+        <article class="card">
+          <h3>diff/</h3>
+          <p>LCS dynamic programming, Myers greedy diff and unified hunk rendering with context merging.</p>
+          <code>lcs.cpp · myers.cpp · unified.cpp</code>
+        </article>
+        <article class="card">
+          <h3>merge/</h3>
+          <p>Two BFS passes for the merge base, then a line-level three-way merge that emits conflict markers.</p>
+          <code>lca.cpp · three_way.cpp</code>
+        </article>
+        <article class="card">
+          <h3>cli/</h3>
+          <p>Command parsing, git-style output and the ASCII DAG renderer with lanes and merge connectors.</p>
+          <code>main.cpp · graph.cpp</code>
+        </article>
+      </div>
+      <div class="format">
+        <h3>The on-disk format</h3>
+        <pre><code>.minigit/
+  HEAD                    ref: refs/heads/main
+  index                   &lt;object-id&gt; &lt;path&gt;
+  objects/ab/cdef…        Huffman-compressed objects, sharded by 2 hex chars
+  refs/heads/main         commit id
+
+object  = "&lt;type&gt; &lt;size&gt;\0&lt;payload&gt;"
+blob    = file bytes
+tree    = "100644 blob &lt;id&gt; name\n" per entry
+commit  = tree + parents + author + timestamp + message</code></pre>
+      </div>
+    </section>
+
+    <section id="cli" class="section">
+      <div class="section-head">
+        <h2>Command line</h2>
+        <p>Eight commands, one binary, no dependencies.</p>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Command</th><th>What it does</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>init</code></td><td>Create the object store, HEAD and refs</td></tr>
+            <tr><td><code>add &lt;path&gt;…</code></td><td>Hash files into blobs and stage them</td></tr>
+            <tr><td><code>commit -m "msg"</code></td><td>Write trees + a commit and advance the branch</td></tr>
+            <tr><td><code>status</code></td><td>Staged, unstaged and untracked changes</td></tr>
+            <tr><td><code>log [--graph]</code></td><td>Walk the DAG, plain or as ASCII lanes</td></tr>
+            <tr><td><code>branch [name]</code></td><td>List branches or create one at HEAD</td></tr>
+            <tr><td><code>checkout &lt;rev&gt;</code></td><td>Switch branch or detach at a commit</td></tr>
+            <tr><td><code>diff [--staged] [--myers]</code></td><td>Unified diff via LCS or Myers</td></tr>
+            <tr><td><code>merge &lt;branch&gt;</code></td><td>Fast-forward or three-way merge with conflicts</td></tr>
+            <tr><td><code>export</code></td><td>JSON snapshot that powers this page</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <p>Built with C++17, <code>std::filesystem</code> and a lot of graphs.</p>
+    <p><a href="https://github.com/Parasjain1234/minigit-cpp" target="_blank" rel="noreferrer">github.com/Parasjain1234/minigit-cpp</a></p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
