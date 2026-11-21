@@ -67,3 +67,15 @@ add_test(NAME three_way_test COMMAND three_way_test)
 add_executable(merge_repository_test merge_repository_test.cpp)
 target_link_libraries(merge_repository_test PRIVATE minigit_core ${MINIGIT_GTEST_MAIN})
 add_test(NAME merge_repository_test COMMAND merge_repository_test)
+
+add_executable(huffman_test huffman_test.cpp)
+target_link_libraries(huffman_test PRIVATE minigit_core ${MINIGIT_GTEST_MAIN})
+add_test(NAME huffman_test COMMAND huffman_test)
+
+add_executable(ignore_test ignore_test.cpp)
+target_link_libraries(ignore_test PRIVATE minigit_core ${MINIGIT_GTEST_MAIN})
+add_test(NAME ignore_test COMMAND ignore_test)
+
+add_executable(export_test export_test.cpp)
+target_link_libraries(export_test PRIVATE minigit_core ${MINIGIT_GTEST_MAIN})
+add_test(NAME export_test COMMAND export_test)
