@@ -29,7 +29,8 @@ void printUsage(std::ostream& out) {
          "   branch [<name>]           List branches or create one at HEAD\n"
          "   checkout <branch|commit>  Switch branches or restore a commit\n"
          "   diff [--staged] [--myers] Show line changes (LCS or Myers)\n"
-         "   merge <branch> [-m <msg>] Merge a branch into the current one\n\n"
+         "   merge <branch> [-m <msg>] Merge a branch into the current one\n"
+         "   export                     Print a JSON snapshot of the repository\n\n"
          "Run 'minigit help' to see this message.\n";
 }
 
@@ -248,6 +249,15 @@ int commandDiff(const std::vector<std::string>& args) {
   return 0;
 }
 
+int commandExport(const std::vector<std::string>& args) {
+  if (args.size() > 1) {
+    throw MinigitError("export takes no arguments");
+  }
+  const minigit::Repository repo = minigit::Repository::open();
+  std::cout << repo.exportJson();
+  return 0;
+}
+
 int commandMerge(const std::vector<std::string>& args) {
   std::string target;
   std::string message;
@@ -377,6 +387,9 @@ int run(const std::vector<std::string>& args) {
   }
   if (command == "merge") {
     return commandMerge(args);
+  }
+  if (command == "export") {
+    return commandExport(args);
   }
 
   throw MinigitError("unknown command '" + command +
