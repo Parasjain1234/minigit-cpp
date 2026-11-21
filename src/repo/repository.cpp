@@ -7,9 +7,11 @@
 #include <memory>
 #include <set>
 #include <sstream>
+#include <utility>
 #include <system_error>
 
 #include "core/error.h"
+#include "diff/unified.h"
 #include "objects/commit.h"
 #include "objects/object.h"
 #include "objects/tree.h"
@@ -665,6 +667,79 @@ void Repository::checkout(const std::string& target) {
   } else {
     writeFile(headPath(), revision->hex() + "\n");
   }
+}
+
+std::string Repository::readBlob(const Oid& oid) const {
+  const Object object = objects_.readOrThrow(oid);
+  if (object.type() != ObjectType::Blob) {
+    throw MinigitError("object " + oid.hex() + " is not a blob");
+  }
+  return object.data();
+}
+
+std::vector<FileDiff> Repository::diff(bool staged,
+                                       DiffAlgorithm algorithm) const {
+  Index index(indexPath());
+  index.load();
+
+  std::map<std::string, std::string> before;
+  std::map<std::string, std::string> after;
+
+  if (staged) {
+    const auto head = headCommit();
+    if (head.has_value()) {
+      for (const auto& [path, oid] : headTree()) {
+        before[path] = readBlob(oid);
+      }
+    }
+    for (const auto& [path, oid] : index.entries()) {
+      after[path] = readBlob(oid);
+    }
+  } else {
+    for (const auto& [path, oid] : index.entries()) {
+      before[path] = readBlob(oid);
+
+      const fs::path file = workTree_ / fs::path(path);
+      std::error_code ec;
+      if (fs::is_regular_file(file, ec)) {
+        after[path] = readFile(file);
+      }
+    }
+  }
+
+  std::set<std::string> paths;
+  for (const auto& [path, content] : before) {
+    (void)content;
+    paths.insert(path);
+  }
+  for (const auto& [path, content] : after) {
+    (void)content;
+    paths.insert(path);
+  }
+
+  std::vector<FileDiff> diffs;
+  for (const std::string& path : paths) {
+    const auto oldIt = before.find(path);
+    const auto newIt = after.find(path);
+    const std::string oldText = oldIt == before.end() ? "" : oldIt->second;
+    const std::string newText = newIt == after.end() ? "" : newIt->second;
+    if (oldText == newText) {
+      continue;
+    }
+
+    FileDiff fileDiff;
+    fileDiff.path = path;
+    if (looksBinary(oldText) || looksBinary(newText)) {
+      fileDiff.text = "Binary files a/" + path + " and b/" + path +
+                      " differ\n";
+    } else {
+      fileDiff.text = renderUnifiedDiff("a/" + path, "b/" + path, oldText,
+                                        newText, algorithm);
+    }
+    diffs.push_back(std::move(fileDiff));
+  }
+
+  return diffs;
 }
 
 StatusReport Repository::status() const {
