@@ -1,10 +1,15 @@
+#include <cstdint>
+#include <ctime>
 #include <filesystem>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <vector>
 
+#include "cli/graph.h"
 #include "core/error.h"
 #include "objects/oid.h"
+#include "repo/history.h"
 #include "repo/repository.h"
 
 namespace {
@@ -19,7 +24,10 @@ void printUsage(std::ostream& out) {
          "   init                      Create an empty MiniGit repository\n"
          "   add <path>...             Add file contents to the index\n"
          "   commit -m <message>       Record staged changes\n"
-         "   status                    Show the working tree status\n\n"
+         "   status                    Show the working tree status\n"
+         "   log [--graph]             Show commit history as a list or DAG\n"
+         "   branch [<name>]           List branches or create one at HEAD\n"
+         "   checkout <branch|commit>  Switch branches or restore a commit\n\n"
          "Run 'minigit help' to see this message.\n";
 }
 
@@ -30,6 +38,20 @@ void printStaged(const std::vector<minigit::StagedChange>& changes) {
   }
 }
 
+std::string formatTimestamp(std::int64_t timestamp) {
+  const std::time_t time = static_cast<std::time_t>(timestamp);
+  std::tm broken{};
+#ifdef _WIN32
+  gmtime_s(&broken, &time);
+#else
+  gmtime_r(&time, &broken);
+#endif
+  char buffer[64] = {};
+  std::strftime(buffer, sizeof(buffer), "%a %b %d %H:%M:%S %Y +0000",
+                &broken);
+  return buffer;
+}
+
 int commandInit(const std::vector<std::string>& args) {
   if (args.size() > 1) {
     throw MinigitError("init takes no arguments");
@@ -38,8 +60,8 @@ int commandInit(const std::vector<std::string>& args) {
   const bool existed = fs::exists(directory / ".minigit");
   minigit::Repository::init(directory);
   std::cout << (existed ? "Reinitialized" : "Initialized")
-            << " empty MiniGit repository in " << (directory / ".minigit").string()
-            << "\n";
+            << " empty MiniGit repository in "
+            << (directory / ".minigit").string() << "\n";
   return 0;
 }
 
@@ -140,6 +162,108 @@ int commandStatus(const std::vector<std::string>& args) {
   return 0;
 }
 
+int commandLog(const std::vector<std::string>& args) {
+  bool showGraph = false;
+  for (std::size_t i = 1; i < args.size(); ++i) {
+    if (args[i] == "--graph") {
+      showGraph = true;
+    } else {
+      throw MinigitError("log: unknown option '" + args[i] + "'");
+    }
+  }
+
+  const minigit::Repository repo = minigit::Repository::open();
+  const auto head = repo.headCommit();
+  if (!head.has_value()) {
+    throw MinigitError("your current branch '" +
+                       (repo.headBranch().empty() ? "HEAD"
+                                                  : repo.headBranch()) +
+                       "' does not have any commits yet");
+  }
+
+  const auto entries = minigit::walkHistory(repo.objects(), *head);
+
+  if (showGraph) {
+    std::vector<minigit::GraphNode> nodes;
+    nodes.reserve(entries.size());
+    for (const auto& entry : entries) {
+      minigit::GraphNode node;
+      node.id = entry.oid.hex();
+      node.parents.reserve(entry.commit.parents.size());
+      for (const minigit::Oid& parent : entry.commit.parents) {
+        node.parents.push_back(parent.hex());
+      }
+      node.label = entry.oid.shortHex() + " " + entry.commit.summary();
+      nodes.push_back(std::move(node));
+    }
+    for (const std::string& line : minigit::renderAsciiGraph(nodes)) {
+      std::cout << line << '\n';
+    }
+    return 0;
+  }
+
+  for (const auto& entry : entries) {
+    std::cout << "commit " << entry.oid.hex() << '\n';
+    if (entry.commit.parents.size() > 1) {
+      std::cout << "Merge:";
+      for (const minigit::Oid& parent : entry.commit.parents) {
+        std::cout << ' ' << parent.shortHex();
+      }
+      std::cout << '\n';
+    }
+    std::cout << "Author: " << entry.commit.author << '\n'
+              << "Date:   " << formatTimestamp(entry.commit.timestamp) << '\n'
+              << '\n';
+
+    std::istringstream message(entry.commit.message);
+    std::string line;
+    while (std::getline(message, line)) {
+      std::cout << "    " << line << '\n';
+    }
+    std::cout << '\n';
+  }
+  return 0;
+}
+
+int commandBranch(const std::vector<std::string>& args) {
+  minigit::Repository repo = minigit::Repository::open();
+
+  if (args.size() == 1) {
+    const std::string current = repo.headBranch();
+    for (const auto& [name, oid] : repo.branches()) {
+      (void)oid;
+      std::cout << (name == current ? "* " : "  ") << name << '\n';
+    }
+    return 0;
+  }
+
+  if (args.size() > 2) {
+    throw MinigitError("branch takes at most one name");
+  }
+
+  repo.createBranch(args[1]);
+  std::cout << "Created branch '" << args[1] << "'\n";
+  return 0;
+}
+
+int commandCheckout(const std::vector<std::string>& args) {
+  if (args.size() != 2) {
+    throw MinigitError("checkout requires exactly one <branch|commit>");
+  }
+
+  minigit::Repository repo = minigit::Repository::open();
+  repo.checkout(args[1]);
+
+  if (repo.headBranch().empty()) {
+    std::cout << "Note: switching to '" << args[1] << "'.\n"
+              << "You are in 'detached HEAD' state; commits made here will "
+                 "not move any branch.\n";
+  } else {
+    std::cout << "Switched to branch '" << repo.headBranch() << "'\n";
+  }
+  return 0;
+}
+
 int run(const std::vector<std::string>& args) {
   if (args.empty()) {
     printUsage(std::cout);
@@ -162,6 +286,15 @@ int run(const std::vector<std::string>& args) {
   }
   if (command == "status") {
     return commandStatus(args);
+  }
+  if (command == "log") {
+    return commandLog(args);
+  }
+  if (command == "branch") {
+    return commandBranch(args);
+  }
+  if (command == "checkout") {
+    return commandCheckout(args);
   }
 
   throw MinigitError("unknown command '" + command +
