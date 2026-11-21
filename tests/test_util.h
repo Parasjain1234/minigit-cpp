@@ -9,8 +9,27 @@
 #include <vector>
 
 #include "diff/diff_types.h"
+#include "objects/commit.h"
+#include "objects/object.h"
+#include "objects/object_store.h"
 
 namespace minigit_test {
+
+/// Writes a commit object directly; used by DAG/merge tests that need shapes
+/// the command line cannot produce yet.
+inline minigit::Oid writeTestCommit(minigit::ObjectStore& store,
+                                    const minigit::Oid& tree,
+                                    const std::vector<minigit::Oid>& parents,
+                                    std::int64_t timestamp,
+                                    const std::string& message) {
+  minigit::Commit commit;
+  commit.tree = tree;
+  commit.parents = parents;
+  commit.author = "Test <test@example.com>";
+  commit.timestamp = timestamp;
+  commit.message = message;
+  return store.write(minigit::ObjectType::Commit, commit.serialize());
+}
 
 /// Rebuilds the "new" side of a diff from its edit script; used by every
 /// algorithm test as a correctness oracle.
