@@ -12,6 +12,8 @@
 
 #include "core/error.h"
 #include "diff/unified.h"
+#include "merge/lca.h"
+#include "merge/three_way.h"
 #include "objects/commit.h"
 #include "objects/object.h"
 #include "objects/tree.h"
@@ -456,7 +458,12 @@ Oid Repository::commit(const std::string& message) {
   }
 
   const auto parent = headCommit();
-  if (parent.has_value()) {
+
+  std::error_code mergeEc;
+  const fs::path mergeHeadPath = gitDir_ / "MERGE_HEAD";
+  const bool merging = fs::is_regular_file(mergeHeadPath, mergeEc);
+
+  if (parent.has_value() && !merging) {
     if (headTree() == index.entries()) {
       throw MinigitError("nothing to commit, working tree clean");
     }
@@ -467,6 +474,10 @@ Oid Repository::commit(const std::string& message) {
   if (parent.has_value()) {
     commit.parents.push_back(*parent);
   }
+  if (merging) {
+    commit.parents.push_back(
+        Oid::fromHex(trim(readFile(mergeHeadPath))));
+  }
   commit.author = userName() + " <" + userEmail() + ">";
   commit.timestamp = std::chrono::duration_cast<std::chrono::seconds>(
                          std::chrono::system_clock::now().time_since_epoch())
@@ -476,6 +487,10 @@ Oid Repository::commit(const std::string& message) {
   const Oid commitId =
       objects_.write(ObjectType::Commit, commit.serialize());
   updateHeadRef(commitId);
+  if (merging) {
+    std::error_code removeEc;
+    fs::remove(mergeHeadPath, removeEc);
+  }
   return commitId;
 }
 
@@ -667,6 +682,195 @@ void Repository::checkout(const std::string& target) {
   } else {
     writeFile(headPath(), revision->hex() + "\n");
   }
+
+  std::error_code mergeEc;
+  fs::remove(gitDir_ / "MERGE_HEAD", mergeEc);
+}
+
+MergeReport Repository::merge(const std::string& target,
+                              const std::string& message) {
+  const auto theirs = resolveRevision(target);
+  if (!theirs.has_value()) {
+    throw MinigitError("merge: '" + target +
+                       "' did not match any branch or commit");
+  }
+
+  const auto ours = headCommit();
+  if (!ours.has_value()) {
+    throw MinigitError(
+        "merge: the current branch has no commits yet; create a commit "
+        "before merging");
+  }
+
+  if (!isClean()) {
+    throw MinigitError(
+        "merge: local changes would be overwritten; commit them first");
+  }
+
+  MergeReport report;
+  if (*ours == *theirs ||
+      isAncestor(objects_, *theirs, *ours)) {
+    report.kind = MergeKind::UpToDate;
+    report.commitId = *ours;
+    return report;
+  }
+
+  const auto base = findMergeBase(objects_, *ours, *theirs);
+  if (!base.has_value()) {
+    throw MinigitError("merge: refusing to merge unrelated histories");
+  }
+  report.base = *base;
+
+  // The current branch is an ancestor of the target: nothing to combine, we
+  // can simply move the branch forward.
+  if (isAncestor(objects_, *ours, *theirs)) {
+    std::map<std::string, Oid> targetFiles;
+    flattenTree(objects_, treeOf(*theirs), "", targetFiles);
+
+    Index previous(indexPath());
+    previous.load();
+    writeWorkingTree(targetFiles, previous);
+
+    Index next(indexPath());
+    next.clear();
+    for (const auto& [path, oid] : targetFiles) {
+      next.add(path, oid);
+    }
+    next.save();
+    updateHeadRef(*theirs);
+
+    report.kind = MergeKind::FastForward;
+    report.commitId = *theirs;
+    return report;
+  }
+
+  std::map<std::string, Oid> baseFiles;
+  std::map<std::string, Oid> oursFiles;
+  std::map<std::string, Oid> theirsFiles;
+  flattenTree(objects_, treeOf(*base), "", baseFiles);
+  flattenTree(objects_, treeOf(*ours), "", oursFiles);
+  flattenTree(objects_, treeOf(*theirs), "", theirsFiles);
+
+  std::set<std::string> paths;
+  for (const auto& [path, oid] : baseFiles) {
+    (void)oid;
+    paths.insert(path);
+  }
+  for (const auto& [path, oid] : oursFiles) {
+    (void)oid;
+    paths.insert(path);
+  }
+  for (const auto& [path, oid] : theirsFiles) {
+    (void)oid;
+    paths.insert(path);
+  }
+
+  std::map<std::string, Oid> mergedFiles;
+
+  for (const std::string& path : paths) {
+    const bool hasBase = baseFiles.count(path) > 0;
+    const bool hasOurs = oursFiles.count(path) > 0;
+    const bool hasTheirs = theirsFiles.count(path) > 0;
+
+    const std::string baseText =
+        hasBase ? readBlob(baseFiles[path]) : std::string();
+    const std::string oursText =
+        hasOurs ? readBlob(oursFiles[path]) : std::string();
+    const std::string theirsText =
+        hasTheirs ? readBlob(theirsFiles[path]) : std::string();
+
+    const bool oursUnchanged =
+        hasOurs == hasBase && oursText == baseText;
+    const bool theirsUnchanged =
+        hasTheirs == hasBase && theirsText == baseText;
+
+    if (oursUnchanged && theirsUnchanged) {
+      if (hasOurs) {
+        mergedFiles[path] = oursFiles[path];
+      }
+      continue;
+    }
+    if (oursUnchanged) {  // take their side, including deletions
+      if (hasTheirs) {
+        mergedFiles[path] = theirsFiles[path];
+      }
+      continue;
+    }
+    if (theirsUnchanged) {  // keep our side, including deletions
+      if (hasOurs) {
+        mergedFiles[path] = oursFiles[path];
+      }
+      continue;
+    }
+
+    if (hasOurs && hasTheirs && oursText == theirsText) {
+      mergedFiles[path] = oursFiles[path];
+      continue;
+    }
+
+    // Modify/delete: there is no text to merge, so keep whichever side still
+    // has the file and flag it for the user.
+    if (!hasOurs || !hasTheirs) {
+      const std::string kept = hasOurs ? oursText : theirsText;
+      mergedFiles[path] = objects_.write(ObjectType::Blob, kept);
+      report.conflicts.push_back(path);
+      continue;
+    }
+
+    if (looksBinary(baseText) || looksBinary(oursText) ||
+        looksBinary(theirsText)) {
+      mergedFiles[path] = oursFiles[path];
+      report.conflicts.push_back(path);
+      continue;
+    }
+
+    const MergeFileResult result =
+        mergeText3Way(baseText, oursText, theirsText);
+    mergedFiles[path] = objects_.write(ObjectType::Blob, result.content);
+    if (result.conflicted) {
+      report.conflicts.push_back(path);
+    }
+  }
+
+  Index mergedIndex(indexPath());
+  mergedIndex.clear();
+  for (const auto& [path, oid] : mergedFiles) {
+    mergedIndex.add(path, oid);
+  }
+
+  Index previous(indexPath());
+  previous.load();
+  writeWorkingTree(mergedFiles, previous);
+  mergedIndex.save();
+
+  std::sort(report.conflicts.begin(), report.conflicts.end());
+
+  if (!report.conflicts.empty()) {
+    writeFile(gitDir_ / "MERGE_HEAD", theirs->hex() + "\n");
+    report.kind = MergeKind::Conflicts;
+    return report;
+  }
+
+  Commit commit;
+  commit.tree = writeTreeFromIndex(mergedIndex);
+  commit.parents = {*ours, *theirs};
+  commit.author = userName() + " <" + userEmail() + ">";
+  commit.timestamp = std::chrono::duration_cast<std::chrono::seconds>(
+                         std::chrono::system_clock::now().time_since_epoch())
+                         .count();
+  commit.message =
+      message.empty() ? "Merge branch '" + target + "'" : trim(message);
+
+  const Oid commitId =
+      objects_.write(ObjectType::Commit, commit.serialize());
+  updateHeadRef(commitId);
+
+  std::error_code mergeEc;
+  fs::remove(gitDir_ / "MERGE_HEAD", mergeEc);
+
+  report.kind = MergeKind::Merged;
+  report.commitId = commitId;
+  return report;
 }
 
 std::string Repository::readBlob(const Oid& oid) const {
