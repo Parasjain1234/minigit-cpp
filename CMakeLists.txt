@@ -15,6 +15,8 @@ add_library(minigit_core STATIC
     src/diff/myers.cpp
     src/diff/unified.cpp
     src/hash/sha1.cpp
+    src/merge/lca.cpp
+    src/merge/three_way.cpp
     src/objects/oid.cpp
     src/objects/object.cpp
     src/objects/object_store.cpp
