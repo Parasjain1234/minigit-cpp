@@ -126,6 +126,11 @@ class Repository {
   /// True when the index matches HEAD and the working tree matches the index.
   bool isClean() const;
 
+  /// Machine readable snapshot of the repository: branches, the full commit
+  /// DAG, the HEAD file list and object statistics.  This feeds the web UI
+  /// (`minigit export`).
+  std::string exportJson() const;
+
   std::string userName() const;
   std::string userEmail() const;
 
