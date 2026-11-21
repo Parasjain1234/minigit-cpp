@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include "diff/diff_types.h"
 #include "objects/commit.h"
 #include "objects/object_store.h"
 #include "objects/oid.h"
@@ -68,6 +69,14 @@ class Repository {
   Oid commit(const std::string& message);
 
   StatusReport status() const;
+
+  /// Raw payload of a blob object.
+  std::string readBlob(const Oid& oid) const;
+
+  /// Text of one diff.  `staged` compares the index against HEAD; otherwise
+  /// the working tree is compared against the index.
+  std::vector<FileDiff> diff(bool staged,
+                             DiffAlgorithm algorithm) const;
 
   std::optional<Oid> headCommit() const;
 
