@@ -6,8 +6,25 @@
 #include <fstream>
 #include <string>
 #include <system_error>
+#include <vector>
+
+#include "diff/diff_types.h"
 
 namespace minigit_test {
+
+/// Rebuilds the "new" side of a diff from its edit script; used by every
+/// algorithm test as a correctness oracle.
+inline std::vector<std::string> applyEdits(
+    const std::vector<minigit::Edit>& edits) {
+  std::vector<std::string> result;
+  result.reserve(edits.size());
+  for (const minigit::Edit& edit : edits) {
+    if (edit.kind != minigit::EditKind::Delete) {
+      result.push_back(edit.line);
+    }
+  }
+  return result;
+}
 
 /// Creates a unique temporary directory and removes it on destruction.
 class TempDir {
