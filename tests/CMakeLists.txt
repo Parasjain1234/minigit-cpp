@@ -27,3 +27,15 @@ add_test(NAME object_store_test COMMAND object_store_test)
 add_executable(repository_test repository_test.cpp)
 target_link_libraries(repository_test PRIVATE minigit_core ${MINIGIT_GTEST_MAIN})
 add_test(NAME repository_test COMMAND repository_test)
+
+add_executable(history_test history_test.cpp)
+target_link_libraries(history_test PRIVATE minigit_core ${MINIGIT_GTEST_MAIN})
+add_test(NAME history_test COMMAND history_test)
+
+add_executable(graph_test graph_test.cpp)
+target_link_libraries(graph_test PRIVATE minigit_core ${MINIGIT_GTEST_MAIN})
+add_test(NAME graph_test COMMAND graph_test)
+
+add_executable(branch_test branch_test.cpp)
+target_link_libraries(branch_test PRIVATE minigit_core ${MINIGIT_GTEST_MAIN})
+add_test(NAME branch_test COMMAND branch_test)
