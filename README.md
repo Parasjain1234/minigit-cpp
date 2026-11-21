@@ -3,9 +3,10 @@
 A Git-like version control system written from scratch in C++17, using only
 the C++ standard library (plus GoogleTest for the test suite).
 
-> **Status: Phase 1 of 5 complete.** Content-addressable object storage,
-> SHA-1 from scratch, `init`, `add`, `commit` and `status` work. `log`,
-> branches, `checkout`, diff and merge follow in later phases.
+> **Status: Phase 2 of 5 complete.** Content-addressable object storage,
+> SHA-1 from scratch, `init`, `add`, `commit`, `status`, `log`,
+> `log --graph`, `branch` and `checkout` work. Diff and merge follow in
+> later phases.
 
 ## Why this exists
 
@@ -34,6 +35,11 @@ echo "hello" > hello.txt
 minigit add hello.txt
 minigit commit -m "first commit"
 minigit status
+
+minigit branch feature
+minigit checkout feature
+minigit log --graph
+minigit checkout main
 ```
 
 ## Layout
@@ -43,10 +49,24 @@ src/
   core/error.h            MinigitError, the single user-facing failure type
   hash/sha1.{h,cpp}       SHA-1 from scratch (incremental, 64-byte blocks)
   objects/                oid, object, object_store, tree, commit
-  repo/                   index + repository facade
-  cli/                    command dispatch and output formatting
+  repo/                   index, repository facade, history walk
+  cli/                    command dispatch, ASCII graph renderer
 tests/                    GoogleTest suite
 ```
+
+## Commit history as a graph
+
+Each commit stores the ids of its parents, so history is a DAG rather than a
+list. `log` walks it with a priority queue: the newest commit is emitted
+first, parents are pushed only if they have not been seen, and a merge
+commit simply pushes two parents. That gives a best-first traversal that
+visits every reachable commit exactly once and never duplicates shared
+history.
+
+`log --graph` keeps a vector of lanes, one per branch line still in flight.
+The first parent continues in the current lane; extra parents open new lanes
+drawn with a backslash arm; a lane that reaches a commit already drawn
+elsewhere is closed with a slash connector.
 
 ## On-disk format
 
@@ -68,8 +88,8 @@ property that makes history trustworthy.
 
 | Phase | Scope |
 | ----- | ----- |
-| 1 | Project structure, SHA-1, object storage, init/add/commit/status |
-| 2 | log, ASCII graph, branches, checkout |
+| 1 ✅ | Project structure, SHA-1, object storage, init/add/commit/status |
+| 2 ✅ | log, ASCII graph, branches, checkout |
 | 3 | LCS diff (DP) and Myers diff |
 | 4 | Merge-base via BFS, 3-way merge, conflict markers |
 | 5 | Huffman compression, `.minignore`, benchmarks, full README |
