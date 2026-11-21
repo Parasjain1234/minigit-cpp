@@ -27,7 +27,8 @@ void printUsage(std::ostream& out) {
          "   status                    Show the working tree status\n"
          "   log [--graph]             Show commit history as a list or DAG\n"
          "   branch [<name>]           List branches or create one at HEAD\n"
-         "   checkout <branch|commit>  Switch branches or restore a commit\n\n"
+         "   checkout <branch|commit>  Switch branches or restore a commit\n"
+         "   diff [--staged] [--myers] Show line changes (LCS or Myers)\n\n"
          "Run 'minigit help' to see this message.\n";
 }
 
@@ -225,6 +226,27 @@ int commandLog(const std::vector<std::string>& args) {
   return 0;
 }
 
+int commandDiff(const std::vector<std::string>& args) {
+  bool staged = false;
+  minigit::DiffAlgorithm algorithm = minigit::DiffAlgorithm::Lcs;
+
+  for (std::size_t i = 1; i < args.size(); ++i) {
+    if (args[i] == "--staged" || args[i] == "--cached") {
+      staged = true;
+    } else if (args[i] == "--myers") {
+      algorithm = minigit::DiffAlgorithm::Myers;
+    } else {
+      throw MinigitError("diff: unknown option '" + args[i] + "'");
+    }
+  }
+
+  const minigit::Repository repo = minigit::Repository::open();
+  for (const minigit::FileDiff& fileDiff : repo.diff(staged, algorithm)) {
+    std::cout << fileDiff.text;
+  }
+  return 0;
+}
+
 int commandBranch(const std::vector<std::string>& args) {
   minigit::Repository repo = minigit::Repository::open();
 
@@ -295,6 +317,9 @@ int run(const std::vector<std::string>& args) {
   }
   if (command == "checkout") {
     return commandCheckout(args);
+  }
+  if (command == "diff") {
+    return commandDiff(args);
   }
 
   throw MinigitError("unknown command '" + command +
