@@ -7,9 +7,11 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(MINIGIT_BUILD_TESTS "Build the unit test suite" ON)
+option(MINIGIT_BUILD_BENCH "Build the benchmark executable" ON)
 option(MINIGIT_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
 
 add_library(minigit_core STATIC
+    src/compress/huffman.cpp
     src/diff/diff_types.cpp
     src/diff/lcs.cpp
     src/diff/myers.cpp
@@ -23,6 +25,7 @@ add_library(minigit_core STATIC
     src/objects/tree.cpp
     src/objects/commit.cpp
     src/repo/history.cpp
+    src/repo/ignore.cpp
     src/repo/index.cpp
     src/repo/repository.cpp
     src/cli/graph.cpp
@@ -44,6 +47,11 @@ endif()
 
 add_executable(minigit src/cli/main.cpp)
 target_link_libraries(minigit PRIVATE minigit_core)
+
+if(MINIGIT_BUILD_BENCH)
+    add_executable(minigit_bench bench/bench.cpp)
+    target_link_libraries(minigit_bench PRIVATE minigit_core)
+endif()
 
 if(MINIGIT_BUILD_TESTS)
     enable_testing()
