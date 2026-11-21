@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdio>
 #include <fstream>
 #include <iterator>
 #include <memory>
@@ -18,6 +19,7 @@
 #include "objects/object.h"
 #include "objects/tree.h"
 #include "repo/history.h"
+#include "repo/ignore.h"
 
 namespace minigit {
 namespace fs = std::filesystem;
@@ -152,6 +154,40 @@ Oid hashWorkingFile(const fs::path& path) {
 
 bool shouldSkipEntry(const fs::path& path) {
   return path.filename() == kGitDirName;
+}
+
+std::string jsonEscape(const std::string& text) {
+  std::string out;
+  out.reserve(text.size() + 8);
+  for (unsigned char c : text) {
+    switch (c) {
+      case '"':
+        out += "\\\"";
+        break;
+      case '\\':
+        out += "\\\\";
+        break;
+      case '\n':
+        out += "\\n";
+        break;
+      case '\r':
+        out += "\\r";
+        break;
+      case '\t':
+        out += "\\t";
+        break;
+      default:
+        if (c < 0x20) {
+          char buffer[8];
+          std::snprintf(buffer, sizeof(buffer), "\\u%04x", c);
+          out += buffer;
+        } else {
+          out += static_cast<char>(c);
+        }
+        break;
+    }
+  }
+  return out;
 }
 
 void validateBranchName(const std::string& name) {
@@ -381,6 +417,9 @@ std::vector<std::string> Repository::add(
   Index index(indexPath());
   index.load();
 
+  IgnoreList ignore(workTree_);
+  ignore.load();
+
   std::vector<std::string> staged;
 
   for (const fs::path& input : paths) {
@@ -407,10 +446,17 @@ std::vector<std::string> Repository::add(
           continue;
         }
         if (it->is_regular_file(ec)) {
-          stageFile(it->path(), index, staged);
+          const std::string relative = relativeToWorkTree(it->path());
+          if (!ignore.isIgnored(relative)) {
+            stageFile(it->path(), index, staged);
+          }
         }
       }
     } else if (fs::is_regular_file(absolute, ec)) {
+      if (ignore.isIgnored(relativeToWorkTree(absolute))) {
+        throw MinigitError("pathspec '" + input.string() +
+                           "' is ignored by .minignore");
+      }
       stageFile(absolute, index, staged);
     } else {
       throw MinigitError("pathspec '" + input.string() +
@@ -685,6 +731,104 @@ void Repository::checkout(const std::string& target) {
 
   std::error_code mergeEc;
   fs::remove(gitDir_ / "MERGE_HEAD", mergeEc);
+}
+
+std::string Repository::exportJson() const {
+  std::ostringstream out;
+  const auto head = headCommit();
+  const std::string branch = headBranch();
+
+  out << "{\n";
+  out << "  \"branch\": \"" << jsonEscape(branch) << "\",\n";
+  out << "  \"detached\": " << (isDetached() ? "true" : "false")
+      << ",\n";
+  out << "  \"head\": "
+      << (head.has_value() ? "\"" + head->hex() + "\"" : "null") << ",\n";
+
+  out << "  \"branches\": [";
+  const auto branchList = branches();
+  for (std::size_t i = 0; i < branchList.size(); ++i) {
+    out << (i == 0 ? "\n" : ",\n");
+    out << "    {\"name\": \"" << jsonEscape(branchList[i].first)
+        << "\", \"commit\": \"" << branchList[i].second.hex() << "\"}";
+  }
+  out << "\n  ],\n";
+
+  std::vector<CommitEntry> entries;
+  if (head.has_value()) {
+    entries = walkHistory(objects_, *head);
+  }
+
+  out << "  \"commits\": [";
+  for (std::size_t i = 0; i < entries.size(); ++i) {
+    const CommitEntry& entry = entries[i];
+    out << (i == 0 ? "\n" : ",\n");
+    out << "    {\"id\": \"" << entry.oid.hex() << "\", \"tree\": \""
+        << entry.commit.tree.hex() << "\", \"parents\": [";
+    for (std::size_t p = 0; p < entry.commit.parents.size(); ++p) {
+      out << (p == 0 ? "" : ", ") << "\""
+          << entry.commit.parents[p].hex() << "\"";
+    }
+    out << "], \"author\": \"" << jsonEscape(entry.commit.author)
+        << "\", \"timestamp\": " << entry.commit.timestamp
+        << ", \"message\": \""
+        << jsonEscape(trim(entry.commit.message)) << "\"}";
+  }
+  out << "\n  ],\n";
+
+  const std::map<std::string, Oid> files = headTree();
+  out << "  \"files\": [";
+  bool firstFile = true;
+  for (const auto& [path, oid] : files) {
+    out << (firstFile ? "\n" : ",\n");
+    firstFile = false;
+    out << "    {\"path\": \"" << jsonEscape(path) << "\", \"size\": "
+        << readBlob(oid).size() << ", \"blob\": \"" << oid.hex()
+        << "\"}";
+  }
+  out << "\n  ],\n";
+
+  std::size_t blobs = 0;
+  std::size_t trees = 0;
+  std::size_t commits = 0;
+  std::error_code ec;
+  for (const auto& shard : fs::directory_iterator(objects_.root(), ec)) {
+    if (!shard.is_directory(ec)) {
+      continue;
+    }
+    for (const auto& file : fs::directory_iterator(shard.path(), ec)) {
+      if (!file.is_regular_file(ec)) {
+        continue;
+      }
+      const std::string hex = shard.path().filename().string() +
+                              file.path().filename().string();
+      const auto oid = Oid::tryParse(hex);
+      if (!oid.has_value()) {
+        continue;
+      }
+      const auto object = objects_.read(*oid);
+      if (!object.has_value()) {
+        continue;
+      }
+      switch (object->type()) {
+        case ObjectType::Blob:
+          ++blobs;
+          break;
+        case ObjectType::Tree:
+          ++trees;
+          break;
+        case ObjectType::Commit:
+          ++commits;
+          break;
+      }
+    }
+  }
+
+  out << "  \"objectCounts\": {\"blobs\": " << blobs
+      << ", \"trees\": " << trees << ", \"commits\": " << commits
+      << "}\n";
+  out << "}\n";
+  return out.str();
 }
 
 MergeReport Repository::merge(const std::string& target,
@@ -993,6 +1137,9 @@ StatusReport Repository::status() const {
     }
   }
 
+  IgnoreList ignore(workTree_);
+  ignore.load();
+
   std::error_code ec;
   for (auto it = fs::recursive_directory_iterator(
            workTree_, fs::directory_options::skip_permission_denied, ec);
@@ -1009,7 +1156,8 @@ StatusReport Repository::status() const {
     }
     const std::string relative =
         it->path().lexically_relative(workTree_).generic_string();
-    if (index.oidFor(relative) == std::nullopt) {
+    if (index.oidFor(relative) == std::nullopt &&
+        !ignore.isIgnored(relative)) {
       report.untracked.push_back(relative);
     }
   }
