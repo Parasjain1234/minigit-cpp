@@ -16,8 +16,10 @@ add_library(minigit_core STATIC
     src/objects/object_store.cpp
     src/objects/tree.cpp
     src/objects/commit.cpp
+    src/repo/history.cpp
     src/repo/index.cpp
     src/repo/repository.cpp
+    src/cli/graph.cpp
 )
 
 target_include_directories(minigit_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
