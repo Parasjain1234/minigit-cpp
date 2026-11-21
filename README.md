@@ -3,10 +3,10 @@
 A Git-like version control system written from scratch in C++17, using only
 the C++ standard library (plus GoogleTest for the test suite).
 
-> **Status: Phase 3 of 5 complete.** Content-addressable object storage,
+> **Status: Phase 4 of 5 complete.** Content-addressable object storage,
 > SHA-1 from scratch, `init`, `add`, `commit`, `status`, `log`,
-> `log --graph`, `branch`, `checkout` and `diff` work. Merge follows in the
-> next phase.
+> `log --graph`, `branch`, `checkout`, `diff` and `merge` work. Huffman
+> compression, `.minignore`, benchmarks and the full docs land in Phase 5.
 
 ## Why this exists
 
@@ -44,6 +44,8 @@ minigit checkout main
 minigit diff              # working tree vs index (LCS)
 minigit diff --staged     # index vs HEAD
 minigit diff --myers      # same, using Myers instead of the DP table
+
+minigit merge feature     # fast-forward or three-way merge
 ```
 
 ## Layout
@@ -54,6 +56,7 @@ src/
   hash/sha1.{h,cpp}       SHA-1 from scratch (incremental, 64-byte blocks)
   objects/                oid, object, object_store, tree, commit
   diff/                   edit scripts, LCS, Myers, unified rendering
+  merge/                  merge-base (BFS) and three-way merge
   repo/                   index, repository facade, history walk
   cli/                    command dispatch, ASCII graph renderer
 tests/                    GoogleTest suite
@@ -92,6 +95,34 @@ three lines of context, merging hunks closer than twice the context window.
 It automatically falls back to Myers when the LCS table would exceed four
 million cells.
 
+## Merging (graph + DP)
+
+`merge` first asks whether one side is already an ancestor of the other; if
+so it fast-forwards. Otherwise it needs the **merge base**: the deepest
+commit both branches share.
+
+`findMergeBase` runs BFS from `ours` recording every ancestor's distance,
+then BFS from `theirs` level by level. Any commit present in both maps is a
+candidate; the one minimising `distanceA + distanceB` is the lowest common
+ancestor. That is O(V + E) over the reachable history, once per direction.
+
+With `base`, `ours` and `theirs` it does a three-way merge per file, using
+the DP diff twice (base→ours, base→theirs). Each edit script is collapsed
+into replacement blocks anchored on base line ranges; the two sorted block
+lists are walked once, so clean changes from both sides are combined in
+linear time. Overlapping blocks conflict and are written as:
+
+```
+<<<<<<< ours
+our version
+=======
+their version
+>>>>>>> theirs
+```
+
+A conflicted merge writes `.minigit/MERGE_HEAD`; the next `commit` picks it
+up as a second parent, so the resulting commit really is a merge in the DAG.
+
 ## On-disk format
 
 ```
@@ -115,6 +146,7 @@ property that makes history trustworthy.
 | 1 ✅ | Project structure, SHA-1, object storage, init/add/commit/status |
 | 2 ✅ | log, ASCII graph, branches, checkout |
 | 3 ✅ | LCS diff (DP), Myers diff, unified output |
+| 4 ✅ | Merge-base via BFS, 3-way merge, conflict markers |
 | 3 | LCS diff (DP) and Myers diff |
 | 4 | Merge-base via BFS, 3-way merge, conflict markers |
 | 5 | Huffman compression, `.minignore`, benchmarks, full README |
