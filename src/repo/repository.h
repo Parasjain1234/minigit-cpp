@@ -23,6 +23,15 @@ struct StagedChange {
   ChangeKind kind;
 };
 
+enum class MergeKind { UpToDate, FastForward, Merged, Conflicts };
+
+struct MergeReport {
+  MergeKind kind = MergeKind::UpToDate;
+  Oid commitId;          // resulting commit (null for a conflicted merge)
+  Oid base;              // merge base that was used
+  std::vector<std::string> conflicts;
+};
+
 /// Everything `minigit status` needs, without any formatting decisions.
 struct StatusReport {
   std::string branch;
@@ -107,6 +116,12 @@ class Repository {
   /// Moves HEAD to `target` (branch or commit) and rewrites the working
   /// tree and index to match.  Refuses to run on a dirty working tree.
   void checkout(const std::string& target);
+
+  /// Merges `target` into the current branch: fast-forwards when possible,
+  /// otherwise performs a three-way merge and creates a merge commit.
+  /// Conflicted files are written with conflict markers and MERGE_HEAD is
+  /// recorded so the next commit gets both parents.
+  MergeReport merge(const std::string& target, const std::string& message);
 
   /// True when the index matches HEAD and the working tree matches the index.
   bool isClean() const;
