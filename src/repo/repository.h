@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include "objects/commit.h"
 #include "objects/object_store.h"
 #include "objects/oid.h"
 #include "repo/index.h"
@@ -80,6 +81,27 @@ class Repository {
   /// Reads the tree id out of a commit object.
   Oid treeOf(const Oid& commitId) const;
 
+  /// Reads a commit object (throws when the id is not a commit).
+  std::optional<Commit> readCommit(const Oid& commitId) const;
+
+  /// Branches sorted by name together with their tip commit.
+  std::vector<std::pair<std::string, Oid>> branches() const;
+
+  bool branchExists(const std::string& name) const;
+
+  /// Creates a branch pointing at HEAD.
+  void createBranch(const std::string& name);
+
+  /// Resolves a branch name, a full object id or an unambiguous id prefix.
+  std::optional<Oid> resolveRevision(const std::string& revision) const;
+
+  /// Moves HEAD to `target` (branch or commit) and rewrites the working
+  /// tree and index to match.  Refuses to run on a dirty working tree.
+  void checkout(const std::string& target);
+
+  /// True when the index matches HEAD and the working tree matches the index.
+  bool isClean() const;
+
   std::string userName() const;
   std::string userEmail() const;
 
@@ -92,6 +114,8 @@ class Repository {
   std::string relativeToWorkTree(const std::filesystem::path& absolute) const;
   Oid writeTreeFromIndex(const Index& index);
   void updateHeadRef(const Oid& commitId);
+  void writeWorkingTree(const std::map<std::string, Oid>& targetTree,
+                        const Index& previousIndex);
   void stageFile(const std::filesystem::path& absolute, Index& index,
                  std::vector<std::string>& staged);
 
