@@ -10,7 +10,9 @@ merge-base, three-way merge and Huffman compression.
 
 > **All five phases are complete.** `init`, `add`, `commit`, `status`, `log`,
 > `log --graph`, `branch`, `checkout`, `diff`, `merge` and `export` work, with
-> 120+ unit tests and a deployable web UI in `web/`.
+> 123 unit tests and a deployable web UI in `web/`.
+>
+> **Live demo:** <https://minigit-bpye3c-preview.freebuff.site>
 
 ---
 
