@@ -3,10 +3,10 @@
 A Git-like version control system written from scratch in C++17, using only
 the C++ standard library (plus GoogleTest for the test suite).
 
-> **Status: Phase 2 of 5 complete.** Content-addressable object storage,
+> **Status: Phase 3 of 5 complete.** Content-addressable object storage,
 > SHA-1 from scratch, `init`, `add`, `commit`, `status`, `log`,
-> `log --graph`, `branch` and `checkout` work. Diff and merge follow in
-> later phases.
+> `log --graph`, `branch`, `checkout` and `diff` work. Merge follows in the
+> next phase.
 
 ## Why this exists
 
@@ -40,6 +40,10 @@ minigit branch feature
 minigit checkout feature
 minigit log --graph
 minigit checkout main
+
+minigit diff              # working tree vs index (LCS)
+minigit diff --staged     # index vs HEAD
+minigit diff --myers      # same, using Myers instead of the DP table
 ```
 
 ## Layout
@@ -49,6 +53,7 @@ src/
   core/error.h            MinigitError, the single user-facing failure type
   hash/sha1.{h,cpp}       SHA-1 from scratch (incremental, 64-byte blocks)
   objects/                oid, object, object_store, tree, commit
+  diff/                   edit scripts, LCS, Myers, unified rendering
   repo/                   index, repository facade, history walk
   cli/                    command dispatch, ASCII graph renderer
 tests/                    GoogleTest suite
@@ -67,6 +72,25 @@ history.
 The first parent continues in the current lane; extra parents open new lanes
 drawn with a backslash arm; a lane that reaches a commit already drawn
 elsewhere is closed with a slash connector.
+
+## Diffing two ways
+
+`lcsDiff` builds an `(n+1) x (m+1)` dynamic programming table where cell
+`(i, j)` is the length of the longest common subsequence of the first `i` old
+lines and the first `j` new lines. Backtracking from `(n, m)` emits `=`,
+`-` and `+` steps. It is easy to prove correct but costs O(n*m) time and
+memory — two 10,000 line files need 100M cells.
+
+`myersDiff` uses Myers' greedy furthest-reaching-path algorithm: it only
+explores the diagonals reachable with `D` edits, keeping a `V` array of the
+furthest `x` per diagonal and snapshotting it for backtracking. Cost is
+O((N+M) · D) time and O(D²) memory in the snapshots, which is dramatically
+cheaper for typical edits (a one-line change has `D = 2`).
+
+`renderUnifiedDiff` groups the resulting edit script into `@@` hunks with
+three lines of context, merging hunks closer than twice the context window.
+It automatically falls back to Myers when the LCS table would exceed four
+million cells.
 
 ## On-disk format
 
@@ -90,6 +114,7 @@ property that makes history trustworthy.
 | ----- | ----- |
 | 1 ✅ | Project structure, SHA-1, object storage, init/add/commit/status |
 | 2 ✅ | log, ASCII graph, branches, checkout |
+| 3 ✅ | LCS diff (DP), Myers diff, unified output |
 | 3 | LCS diff (DP) and Myers diff |
 | 4 | Merge-base via BFS, 3-way merge, conflict markers |
 | 5 | Huffman compression, `.minignore`, benchmarks, full README |
