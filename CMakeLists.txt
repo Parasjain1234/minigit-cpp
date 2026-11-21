@@ -10,6 +10,10 @@ option(MINIGIT_BUILD_TESTS "Build the unit test suite" ON)
 option(MINIGIT_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
 
 add_library(minigit_core STATIC
+    src/diff/diff_types.cpp
+    src/diff/lcs.cpp
+    src/diff/myers.cpp
+    src/diff/unified.cpp
     src/hash/sha1.cpp
     src/objects/oid.cpp
     src/objects/object.cpp
