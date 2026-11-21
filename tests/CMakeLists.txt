@@ -55,3 +55,15 @@ add_test(NAME unified_test COMMAND unified_test)
 add_executable(diff_repository_test diff_repository_test.cpp)
 target_link_libraries(diff_repository_test PRIVATE minigit_core ${MINIGIT_GTEST_MAIN})
 add_test(NAME diff_repository_test COMMAND diff_repository_test)
+
+add_executable(lca_test lca_test.cpp)
+target_link_libraries(lca_test PRIVATE minigit_core ${MINIGIT_GTEST_MAIN})
+add_test(NAME lca_test COMMAND lca_test)
+
+add_executable(three_way_test three_way_test.cpp)
+target_link_libraries(three_way_test PRIVATE minigit_core ${MINIGIT_GTEST_MAIN})
+add_test(NAME three_way_test COMMAND three_way_test)
+
+add_executable(merge_repository_test merge_repository_test.cpp)
+target_link_libraries(merge_repository_test PRIVATE minigit_core ${MINIGIT_GTEST_MAIN})
+add_test(NAME merge_repository_test COMMAND merge_repository_test)
