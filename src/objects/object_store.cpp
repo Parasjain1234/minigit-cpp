@@ -4,6 +4,7 @@
 #include <iterator>
 #include <system_error>
 
+#include "compress/huffman.h"
 #include "core/error.h"
 
 namespace minigit {
@@ -80,7 +81,7 @@ Oid ObjectStore::write(ObjectType type, const std::string& data) {
                        target.parent_path().string() + ": " + ec.message());
   }
 
-  writeAtomically(target, object.serialize());
+  writeAtomically(target, Huffman::compress(object.serialize()));
   return oid;
 }
 
@@ -91,7 +92,10 @@ std::optional<Object> ObjectStore::read(const Oid& oid) const {
     return std::nullopt;
   }
 
-  const std::string raw = readWholeFile(path);
+  std::string raw = readWholeFile(path);
+  if (Huffman::isCompressed(raw)) {
+    raw = Huffman::decompress(raw);
+  }
   Object object = Object::deserialize(raw);
   if (object.oid() != oid) {
     throw MinigitError("corrupt object " + oid.hex() +
