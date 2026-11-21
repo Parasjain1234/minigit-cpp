@@ -28,7 +28,8 @@ void printUsage(std::ostream& out) {
          "   log [--graph]             Show commit history as a list or DAG\n"
          "   branch [<name>]           List branches or create one at HEAD\n"
          "   checkout <branch|commit>  Switch branches or restore a commit\n"
-         "   diff [--staged] [--myers] Show line changes (LCS or Myers)\n\n"
+         "   diff [--staged] [--myers] Show line changes (LCS or Myers)\n"
+         "   merge <branch> [-m <msg>] Merge a branch into the current one\n\n"
          "Run 'minigit help' to see this message.\n";
 }
 
@@ -247,6 +248,59 @@ int commandDiff(const std::vector<std::string>& args) {
   return 0;
 }
 
+int commandMerge(const std::vector<std::string>& args) {
+  std::string target;
+  std::string message;
+
+  for (std::size_t i = 1; i < args.size(); ++i) {
+    if (args[i] == "-m" || args[i] == "--message") {
+      if (i + 1 >= args.size()) {
+        throw MinigitError("merge: option '" + args[i] +
+                           "' requires a message argument");
+      }
+      message = args[++i];
+    } else if (target.empty()) {
+      target = args[i];
+    } else {
+      throw MinigitError("merge: unexpected argument '" + args[i] + "'");
+    }
+  }
+
+  if (target.empty()) {
+    throw MinigitError("merge requires a branch name");
+  }
+
+  minigit::Repository repo = minigit::Repository::open();
+  const minigit::MergeReport report = repo.merge(target, message);
+
+  switch (report.kind) {
+    case minigit::MergeKind::UpToDate:
+      std::cout << "Already up to date.\n";
+      return 0;
+    case minigit::MergeKind::FastForward:
+      std::cout << "Fast-forward to " << report.commitId.shortHex() << '\n';
+      return 0;
+    case minigit::MergeKind::Merged:
+      std::cout << "Merge made by the three-way strategy: ["
+                << repo.headBranch() << ' ' << report.commitId.shortHex()
+                << "] "
+                << (message.empty() ? "Merge branch '" + target + "'"
+                                    : message)
+                << '\n';
+      return 0;
+    case minigit::MergeKind::Conflicts:
+      std::cout << "Merge base " << report.base.shortHex() << '\n'
+                << "Automatic merge failed; fix conflicts and then commit "
+                   "the result.\n"
+                << "Conflicts:\n";
+      for (const std::string& path : report.conflicts) {
+        std::cout << "\tboth modified: " << path << '\n';
+      }
+      return 1;
+  }
+  return 0;
+}
+
 int commandBranch(const std::vector<std::string>& args) {
   minigit::Repository repo = minigit::Repository::open();
 
@@ -320,6 +374,9 @@ int run(const std::vector<std::string>& args) {
   }
   if (command == "diff") {
     return commandDiff(args);
+  }
+  if (command == "merge") {
+    return commandMerge(args);
   }
 
   throw MinigitError("unknown command '" + command +
